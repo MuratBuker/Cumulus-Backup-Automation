@@ -1,117 +1,55 @@
 ---
-### First Play: Gather date/time from localhost
-- name: Gather date/time on localhost
-  hosts: localhost
-  gather_facts: true
-  tasks:
-    - name: Set date and time facts for use in ADC tasks
-      set_fact:
-        backup_date: "{{ ansible_date_time.date }}"
-        backup_time: "{{ ansible_date_time.time }}"
-        timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
-
-### Second Play: ADC backup using date/time from localhost
-- name: Backup Citrix ADCs via Citrix ADM Proxy
-  hosts: adm_server
-  gather_facts: false
+### NVIDIA Backup ###
+- hosts: DC1, DC2
+  gather_facts: yes
   vars:
     dest_path: "/root/{{ datacenter }}"
-    folder: "{{ dest_path }}/{{ inventory_hostname }}/{{ hostvars['localhost']['backup_date'] }}"
-    filename: "{{ folder }}/backup_{{ hostvars['localhost']['backup_date'] }}_{{ hostvars['localhost']['backup_time'] }}.tgz"
-    latest_file: "{{ dest_path }}/{{ inventory_hostname }}/latest/latest.tgz"
+    folder: "{{ dest_path }}/{{ inventory_hostname }}/{{ ansible_date_time.date }}"
+    filename: "{{ folder }}/backup_{{ ansible_date_time.date }}_{{ ansible_date_time.time }}.yaml"
+    latest_file: "{{ dest_path }}/{{ inventory_hostname }}/latest/latest.yaml"
+
   tasks:
-
-    - name: Create directory structure
-      block:
-        - name: Create date-based backup folder
-          file:
-            path: "{{ folder }}"
-            mode: 0775
-            owner: root
-            group: root
-            state: directory
-        
-        - name: Create latest directory
-          file:
-            path: "{{ dest_path }}/{{ inventory_hostname }}/latest/"
-            state: directory
-            owner: root
-            group: root
-            mode: 0775
-      delegate_to: localhost
-
-    - name: Get list of managed ADCs from ADM
-      uri:
-        url: "https://{{ inventory_hostname }}/nitro/v1/config/managed_device"
-        method: GET
-        validate_certs: false
-        headers:
-          Cookie: "NITRO_AUTH_TOKEN={{ adm_auth_token }}"
-          Content-Type: "application/json"
-      register: managed_devices
-      delegate_to: localhost
-      retries: 3
-      delay: 10
-      until: managed_devices.status == 200
-
-    - name: Create backups for all managed ADCs via ADM proxy
-      community.network.netscaler_systembackup:
-        api_path: "nitro/v1/config"
-        nsip: "{{ item.ip_address }}"
-        managed_netscaler_instance_ip: "{{ item.ip_address }}"
-        managed_netscaler_instance_username: "{{ adc_username }}"
-        managed_netscaler_instance_password: "{{ adc_password }}"
-        managed_netscaler_instance_id: "{{ item.id }}"
-        netscaler_console_as_proxy_server: true
-        nitro_auth_token: "{{ adm_auth_token }}"
-        nitro_protocol: https
-        validate_certs: false
-        level: full
-        includekernel: "YES"
-        filename: "nsbackup_{{ item.hostname }}_{{ hostvars['localhost']['timestamp'] }}.tgz"
-        comment: "Automated backup via ADM proxy @ {{ hostvars['localhost']['backup_date'] }} {{ hostvars['localhost']['backup_time'] }}"
-        uselocaltimezone: true
-        save_config: true
-      loop: "{{ managed_devices.json.managed_device }}"
-      loop_control:
-        label: "{{ item.hostname }}"
-      register: backup_results
-      retries: 3
-      delay: 15
-
-    - name: Download and organize backups
-      block:
-        - name: Download backups to control node
-          ansible.builtin.fetch:
-            src: "/var/nsbackups/nsbackup_{{ item.item.hostname }}_{{ hostvars['localhost']['timestamp'] }}.tgz"
-            dest: "{{ folder }}/"
-            flat: yes
-          loop: "{{ backup_results.results }}"
-          when: item.changed
-          ignore_errors: yes
-        
-        - name: Create symlink to latest backup
-          file:
-            src: "{{ folder }}/nsbackup_{{ item.item.hostname }}_{{ hostvars['localhost']['timestamp'] }}.tgz"
-            dest: "{{ dest_path }}/{{ inventory_hostname }}/latest/{{ item.item.hostname }}_latest.tgz"
-            state: link
-          loop: "{{ backup_results.results }}"
-          when: item.changed
-          delegate_to: localhost
-      when: backup_results is changed
-
-    - name: Clean up old backups (keep last 7 days)
-      find:
-        paths: "{{ dest_path }}/{{ inventory_hostname }}"
-        patterns: "*.tgz"
-        age: "7d"
-      register: old_backups
-      delegate_to: localhost
-
-    - name: Remove outdated backups
+    - name: Creating backup folder if it does not exist
       file:
-        path: "{{ item.path }}"
-        state: absent
-      loop: "{{ old_backups.files }}"
-      when: old_backups.matched > 0
+        path: "{{ folder }}"
+        mode: 0775
+        owner: root
+        group: root
+        state: directory
       delegate_to: localhost
+
+    - name: Creating diff directory if it does not exist
+      file:
+        path: "{{ dest_path }}/{{ inventory_hostname }}/latest/"
+        state: directory
+        owner: root
+        group: root
+        mode: 0775
+      delegate_to: localhost
+
+    - name: Check startup.yaml exists
+      stat:
+        path: /etc/nvue.d/startup.yaml
+      register: config_1
+
+    - name: Backing up switch.yaml config file to localhost
+      become: yes
+      fetch:
+        src: "/etc/nvue.d/startup.yaml"
+        dest: "{{ filename }}"
+        flat: yes
+      when: config_1.stat.exists
+
+    - name: Comparing previous and new config files
+      shell: diff "{{ filename }}" "{{ latest_file }}" > "{{ dest_path }}/{{ inventory_hostname }}/latest/compared.yaml"
+      register: diff_output
+      ignore_errors: true
+      changed_when: diff_output.rc == 1
+      failed_when: diff_output.rc > 1
+      delegate_to: localhost
+
+
+    - name: Updating latest config file to compare with next backup
+      command: cp "{{ filename }}" "{{ latest_file }}"
+      delegate_to: localhost
+
