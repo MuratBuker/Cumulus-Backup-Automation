@@ -28,6 +28,7 @@ ansible-playbook -i inventory.ini playbook_name.yml
 ~~~
 
 - Monitor the output for any errors or confirmations of successful execution.
+- Check the backup directory specified in the playbook to verify that backups have been created successfully.
 
 ## Playbook Variables
 
@@ -48,6 +49,17 @@ You can change below variables in the playbook as per your requirements.
 - `datacenter`: A variable that should be defined in your inventory or playbook to specify the data center name.
 - `backup_date` and `backup_time`: Variables that should be defined in your playbook or inventory to timestamp the backups.
 - `inventory_hostname`: A built-in Ansible variable that represents the current host being managed.
+
+## Callback Plugin for Email Notifications
+
+- The repository includes a custom callback plugin (`email_playbook_results.py`) that sends email notifications with the results of playbook executions.
+- Update the email addresses and SMTP server details in the plugin as needed.
+- Ensure that the callback plugin is placed in the `callback_plugins` directory and that Ansible is configured to use it.
+
+## Security Considerations
+
+- Ensure that sensitive information such as passwords and API keys are managed securely, using Ansible Vault or environment variables.
+- Regularly update Ansible and related dependencies to mitigate security vulnerabilities.
 
 ### Contributing
 
