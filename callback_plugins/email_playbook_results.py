@@ -42,9 +42,9 @@ class CallbackModule(CallbackBase):
         subject = "Ansible Playbook Results"
         msg = MIMEText(body)
         msg["Subject"] = "Ansible Notification - NVIDIA Backup Automation"
-        msg["From"] = "cloudnotification@glasshouse.com.tr"
-        smtp_server = "172.21.0.61"
-        smtp_port = "26589"
+        msg["From"] = "FROM-ADDRESS"
+        smtp_server = "SMTP-SERVER-IP"
+        smtp_port = "SMTP-SERVER-PORT"
         recipients = [
             "GHDesign&PlanningTeam@glasshouse.com.tr",
             "baris.serbes@glasshouse.com.tr",
