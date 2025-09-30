@@ -46,13 +46,8 @@ class CallbackModule(CallbackBase):
         smtp_server = "SMTP-SERVER-IP"
         smtp_port = "SMTP-SERVER-PORT"
         recipients = [
-            "GHDesign&PlanningTeam@glasshouse.com.tr",
-            "baris.serbes@glasshouse.com.tr",
-            "GHNetSecTeam@glasshouse.com.tr",
-            "burak.cetinkaya@glasshouse.com.tr",
-            "emrah.bayarcelik@glasshouse.com.tr",
-            "sevilay.kurt@glasshouse.com.tr",
-            "lutfi.yunusoglu@glasshouse.com.tr",
+            "RECEIVER-ADDRESS-1",
+            "RECEIVER-ADDRESS-2",
         ]
         msg["To"] = ", ".join(recipients)
 
