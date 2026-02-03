@@ -1,5 +1,5 @@
 ---
-### NVIDIA Backup ###
+### NVIDIA Backup with Diff Logic ###
 - hosts: DC1, DC2
   gather_facts: yes
   vars:
@@ -9,22 +9,16 @@
     latest_file: "{{ dest_path }}/{{ inventory_hostname }}/latest/latest.yaml"
 
   tasks:
-    - name: Creating backup folder if it does not exist
+    - name: Creating backup and latest folders
       file:
-        path: "{{ folder }}"
+        path: "{{ item }}"
         mode: 0775
         owner: root
         group: root
         state: directory
-      delegate_to: localhost
-
-    - name: Creating diff directory if it does not exist
-      file:
-        path: "{{ dest_path }}/{{ inventory_hostname }}/latest/"
-        state: directory
-        owner: root
-        group: root
-        mode: 0775
+      loop:
+        - "{{ folder }}"
+        - "{{ dest_path }}/{{ inventory_hostname }}/latest"
       delegate_to: localhost
 
     - name: Check startup.yaml exists
@@ -40,16 +34,33 @@
         flat: yes
       when: config_1.stat.exists
 
-    - name: Comparing previous and new config files
-      shell: diff "{{ filename }}" "{{ latest_file }}" > "{{ dest_path }}/{{ inventory_hostname }}/latest/compared.yaml"
+    - name: Compare NVIDIA configs (ignore hashed passwords)
+      shell: |
+        set -o pipefail
+        # Ignores common hashed password prefixes in Cumulus/NVIDIA YAML
+        diff -I 'password:' -I 'hashed-password:' "{{ filename }}" "{{ latest_file }}" \
+          | tee "{{ dest_path }}/{{ inventory_hostname }}/latest/compared.yaml"
+      args:
+        executable: /bin/bash
       register: diff_output
       ignore_errors: true
       changed_when: diff_output.rc == 1
       failed_when: diff_output.rc > 1
       delegate_to: localhost
+      notify: Print NVIDIA config differences
 
-
-    - name: Updating latest config file to compare with next backup
-      command: cp "{{ filename }}" "{{ latest_file }}"
+    - name: Updating latest config file
+      copy:
+        src: "{{ filename }}"
+        dest: "{{ latest_file }}"
+        mode: 0644
       delegate_to: localhost
+      when: diff_output.rc in [0, 1]
 
+  handlers:
+    - name: Print NVIDIA config differences
+      debug:
+        msg: |
+          Differences detected for NVIDIA switch {{ inventory_hostname }}:
+          {{ diff_output.stdout }}
+      when: diff_output.rc == 1
