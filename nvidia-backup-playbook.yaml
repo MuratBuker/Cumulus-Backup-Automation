@@ -1,0 +1,74 @@
+---
+### NVIDIA Backup with Diff Logic ###
+- hosts: equinix,kkb,turksat
+  gather_facts: yes
+  vars:
+    dest_path: "/root/{{ datacenter }}"
+    folder: "{{ dest_path }}/{{ inventory_hostname }}/{{ ansible_date_time.date }}"
+    filename: "{{ folder }}/backup_{{ ansible_date_time.date }}_{{ ansible_date_time.time }}.yaml"
+    latest_file: "{{ dest_path }}/{{ inventory_hostname }}/latest/latest.yaml"
+
+  tasks:
+    - name: Creating backup and latest folders
+      file:
+        path: "{{ item }}"
+        mode: 0775
+        owner: root
+        group: root
+        state: directory
+      loop:
+        - "{{ folder }}"
+        - "{{ dest_path }}/{{ inventory_hostname }}/latest"
+      delegate_to: localhost
+
+    - name: Check startup.yaml exists
+      stat:
+        path: /etc/nvue.d/startup.yaml
+      register: config_1
+
+    - name: Backing up switch.yaml config file to localhost
+      become: yes
+      fetch:
+        src: "/etc/nvue.d/startup.yaml"
+        dest: "{{ filename }}"
+        flat: yes
+      when: config_1.stat.exists
+
+    - name: Check if latest config exists
+      stat:
+        path: "{{ latest_file }}"
+      register: latest_stat
+      delegate_to: localhost
+
+    - name: Compare NVIDIA configs
+      shell: |
+        set -o pipefail
+        diff -I 'password:' -I 'hashed-password:' "{{ filename }}" "{{ latest_file }}" \
+          | tee "{{ dest_path }}/{{ inventory_hostname }}/latest/compared.yaml"
+      args:
+        executable: /bin/bash
+      register: diff_output
+      ignore_errors: true
+      changed_when: diff_output.rc == 1
+      failed_when: diff_output.rc > 1
+      delegate_to: localhost
+      notify: Print NVIDIA config differences
+      when: latest_stat.stat.exists
+
+    - name: Updating latest config file
+      copy:
+        src: "{{ filename }}"
+        dest: "{{ latest_file }}"
+        mode: 0644
+      delegate_to: localhost
+      when: >
+        not latest_stat.stat.exists or
+        diff_output.rc is defined and diff_output.rc in [0, 1]
+
+  handlers:
+    - name: Print NVIDIA config differences
+      debug:
+        msg: |
+          Differences detected for NVIDIA switch {{ inventory_hostname }}:
+          {{ diff_output.stdout }}
+      when: diff_output.rc == 1
